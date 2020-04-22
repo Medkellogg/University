@@ -16,17 +16,28 @@ by Mark Kellogg 4/17/2020
  */
 
 #include <Arduino.h>
+#include <RotaryEncoder.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 #define ROTARYSTEPS 1
 #define ROTARYMIN 7
 #define ROTARYMAX 12
 
+//--- Setup a RoraryEncoder for pins A2 and A3:
+RotaryEncoder encoder(A2, A3);
+
+//--- Last known rotary position.
+int lastPos = -1;
+
+//---Setup Rotary Encoder switch on pin D2 with other side to ground - active low
+int rotarySwitch = 2;
 
 //---------DEBUG LED---------------
 const int ledPin = 5;
 const int switchPin = 7; // push switch between pin 4 and GND
 const int blinkDelay = 500;
-
+long lastTime = 0; // the time the LED blinked on or off
 
 
 //------------------GLOBAL VARIABLES----------------------
@@ -51,28 +62,32 @@ bool sensorThroat = false;
 bool sensorCycled = false;
 bool sensorClear = true;
 
+int knobClick = 1;
+int knobClickLast = 1;
 int knobPosition = ROTARYMAX;
-bool knobClick = false;
-bool knobMoving = false;
+bool knobMoving;
 
-long lastTime = 0; // the time the LED blinked on or off
+
 
 //---------------SETUP STATE Machine and Functions----------------------
-enum {HOUSEKEEP, STAND_BY, TRACK_SELECT, TRACK_SETUP, TRACK_ACTIVE, OCCUPIED,} mode;
+enum {HOUSEKEEP, STAND_BY, TRACK_SETUP, TRACK_ACTIVE, OCCUPIED,} mode;
 
 void runHOUSEKEEP();
 void runSTAND_BY();
-void runTRACK_SELECT();
 void runTRACK_SETUP();
 void runTRACK_ACTIVE();
 void runOCCUPIED();
 boolean switchPressed();  //might be knobClick in final
+void readEncoder();
 
 
 void setup() 
 {
   pinMode(ledPin, OUTPUT);
   pinMode(switchPin, INPUT_PULLUP);
+  encoder.setPosition(ROTARYMIN / ROTARYSTEPS); // start with the value of ROTARYMIN .
+
+  pinMode(rotarySwitch, INPUT_PULLUP);
   mode = HOUSEKEEP;
 
   Serial.begin(115200);
@@ -82,7 +97,7 @@ void setup()
 
 void loop() 
 {
-  //delay(700);        //-----------debug----------------
+    delay(1000);        //-----------debug----------------
   if (mode == HOUSEKEEP)
   {
     runHOUSEKEEP();
@@ -90,15 +105,9 @@ void loop()
 
   else if (mode == STAND_BY)
   {
-    runSTAND_BY();
+       runSTAND_BY();
   }
 
-  else if (mode == TRACK_SELECT)
-  {
-    runTRACK_SELECT();
-
-  }
-  
   else if (mode == TRACK_SETUP)
   {
     runTRACK_SETUP();
@@ -119,10 +128,11 @@ void loop()
 void runHOUSEKEEP()
 {
   railPower = false;         //send railPower off to TCA
-  tracknumChoice =  ROTARYMAX;
-  tracknumActive =  ROTARYMAX;
-  tracknumDisplay =  ROTARYMAX;
-  tracknumLast =  ROTARYMAX;
+  //tracknumChoice =  ROTARYMAX;
+  //tracknumActive =  ROTARYMAX;
+  //tracknumDisplay =  ROTARYMAX;
+  //tracknumLast =  ROTARYMAX;  //####---UPDATE this with true number from Maybe just ignore
+  //####Send TCA tracknumActive to TCA - Call comm function here------------#####
   Serial.println("HOUSEKEEP");
   mode = STAND_BY;
   
@@ -132,13 +142,6 @@ void runHOUSEKEEP()
 void runSTAND_BY()
 {
   Serial.println("STAND_BY");
-  mode = TRACK_SELECT;
-} 
-
-//-----------------------TRACK_SELECT Function----------------------
-void runTRACK_SELECT()
-{
-  Serial.println("TRACT_SELECT");
   if (switchPressed())
   {
     mode = OCCUPIED;
@@ -146,8 +149,8 @@ void runTRACK_SELECT()
   else
   {
     mode = TRACK_SETUP;
-  } 
-}
+  }  
+} 
 
 
 //-----------------------TRACK_SETUP Function-----------------------
@@ -182,7 +185,7 @@ void runOCCUPIED()
   }
   
 }
-//------------------------------RotaryKnob pressed---------------------
+//------------------------------Track Sensor pressed---------------------
 boolean switchPressed()
 {
   if (digitalRead(switchPin) == LOW)
@@ -191,4 +194,70 @@ boolean switchPressed()
     return true;
   }
   return false;
+}
+
+//------------------------ReadEncoder Function----------------------
+
+void readEncoder()
+{
+  encoder.tick();
+  ;
+
+  // get the current physical position and calc the logical position
+
+  int newPos = encoder.getPosition() * ROTARYSTEPS;
+  
+   /*----------Use of ROTARYMAX inside the if statement: counter will roll from min to max and keep counting in a loop.  To make counter stop at lower limit use ROTARYMIN */
+    
+  if (newPos < ROTARYMIN)
+  {
+    encoder.setPosition(ROTARYMAX / ROTARYSTEPS);
+    newPos = ROTARYMAX;
+  }
+
+  /*------------Use of ROTARYMIN inside the if statement: counter will roll from max to min and keep counting in a loop.  o make counter stop at upper limit use ROTARYMAX. */
+  
+  else if (newPos > ROTARYMAX)
+  {
+    encoder.setPosition(ROTARYMIN / ROTARYSTEPS);
+    newPos = ROTARYMIN;
+
+  }  // End if newPos
+  
+
+  if (lastPos != newPos)
+  {
+    if (newPos == ROTARYMAX)
+    {
+      Serial.print("REV LOOP");
+      Serial.println();
+    }
+    else
+    {
+      Serial.print(newPos);
+      Serial.println();
+    }
+    lastPos = newPos;
+    tracknumDisplay = lastPos;
+
+      Serial.print("tracknumDisplay: ");
+      Serial.print(tracknumDisplay);
+      Serial.println();
+
+      Serial.print("tracknumActive: ");
+      Serial.print(tracknumActive);
+      Serial.println();
+      
+  } // End if lastPos
+
+    //------Read the rotarySwitch for new track selection and update the active track 
+    knobClick = digitalRead(rotarySwitch);   
+    delay(10);
+    if(knobClick != knobClickLast)          
+    {
+      tracknumActive = tracknumDisplay;
+    } // End new active track selection    
+
+    
+  
 }
